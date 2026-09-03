@@ -1,0 +1,18 @@
+# Dependabot keeps the MSAL and x/term dependencies current so security fixes
+# show up as PRs rather than slipping past. Bumps are grouped into one weekly
+# PR so they share a single lockfile change. A bump here reaches six shipped
+# binaries across xql and xfiles on their next release, so read the MSAL
+# changelog before merging a minor.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      go-modules:
+        patterns:
+          - "*"

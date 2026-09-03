@@ -1,0 +1,14 @@
+name: ci
+
+# The checks live in excelano/.github. This module is imported by other code,
+# so it calls the library policy: the binary checks plus a run against the
+# oldest Go version go.mod promises consumers.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: excelano/.github/.github/workflows/go-lib-ci.yml@main

@@ -1,0 +1,45 @@
+# spauth
+
+The SharePoint sign-in layer shared by the Excelano SharePoint tools: [xql](https://github.com/excelano/xql)'s `sp` backend and the five [xfiles](https://github.com/excelano/xfiles) commands (`xftp`, `xcp`, `xsync`, `xfind`, `xtree`). It carries the device-code OAuth flow over MSAL, the on-disk token cache those tools share, the refusal that keeps an unattended caller from hanging on a code nobody will read, a table of AADSTS error hints, and a thin authenticated Microsoft Graph HTTP client.
+
+It is a library for that family, not a general Graph SDK. The client ID, authority and scope are constants: every consumer signs in against the one "Excelano SharePoint tools" app registration, which is what lets consent and the cached session carry across all six binaries. To self-host, change the constants and rebuild the consumers.
+
+## Install
+
+```
+go get github.com/excelano/spauth
+```
+
+## Usage
+
+```go
+import "github.com/excelano/spauth"
+
+client, err := spauth.NewPublicClient(cachePath)
+if err != nil { /* setup failure */ }
+
+result, err := spauth.Authenticate(ctx, client)
+if err != nil {
+    fmt.Fprintf(os.Stderr, "authentication failed: %v%s\n", err, spauth.HintForAuthError(err))
+    os.Exit(1)
+}
+
+graph := spauth.NewGraphClient(client, result.Account)
+body, err := graph.Get(ctx, "/sites/"+siteID+"/lists", nil)
+```
+
+`Authenticate` tries a silent refresh against the cached account first and falls back to device code, printing the code and URL on stderr. When that fallback would be needed and stderr is not a terminal it returns `ErrNoTerminal` at once instead of polling for fifteen minutes: the remedy is in the message, and a cached refresh token still renews unattended, so the guard only ever bites the first sign-in.
+
+`NewGraphClient` takes options. `WithTimeout` bounds each request; the default of five minutes is sized for file content. `WithHeader` adds a header to every authenticated request, which is how xql sends the `Prefer` header SharePoint needs before it will `$filter` on non-indexed list columns.
+
+## The token cache
+
+The cache file is MSAL's own format, written 0600 in a 0700 directory. Writes go through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
+
+## Not a consumer
+
+blick-cli hand-rolls `x/oauth2` against per-tenant mailbox scopes. That is a different design on purpose and should not be folded in here.
+
+## License
+
+MIT. Author: David M. Anderson. Built with AI assistance (Claude, Anthropic).
