@@ -8,7 +8,36 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
 )
+
+// MSAL records "common" as the realm of an account signed in through the
+// /common authority, so the tenant has to come from the home account ID.
+func TestTenantOfReadsHomeAccountID(t *testing.T) {
+	acct := public.Account{HomeAccountID: "user-oid.tenant-id", Realm: "common"}
+	if got := tenantOf(acct); got != "tenant-id" {
+		t.Errorf("tenantOf = %q, want the id after the dot", got)
+	}
+	if got := tenantOf(public.Account{Realm: "fallback"}); got != "fallback" {
+		t.Errorf("tenantOf with no home account id = %q, want the realm", got)
+	}
+}
+
+func TestUntilPhrase(t *testing.T) {
+	cases := map[time.Duration]string{
+		-time.Minute:               "lapsed",
+		45 * time.Minute:           "in 45m",
+		time.Hour + 19*time.Minute: "in 1h19m",
+		2 * time.Hour:              "in 2h",
+		time.Hour + 5*time.Minute + 29*time.Second: "in 1h05m",
+	}
+	for d, want := range cases {
+		if got := untilPhrase(d); got != want {
+			t.Errorf("untilPhrase(%v) = %q, want %q", d, got, want)
+		}
+	}
+}
 
 // With nothing cached the answer comes from the cache alone: not signed in,
 // a reason, no error, and no sign-in started.

@@ -58,7 +58,7 @@ func CheckStatus(ctx context.Context, client public.Client, cachePath string) (S
 	}
 	account := accounts[0]
 	st.Account = account.PreferredUsername
-	st.Tenant = account.Realm
+	st.Tenant = tenantOf(account)
 
 	result, err := client.AcquireTokenSilent(ctx, defaultScopes, public.WithSilentAccount(account))
 	if err != nil {
@@ -72,10 +72,24 @@ func CheckStatus(ctx context.Context, client public.Client, cachePath string) (S
 
 	st.SignedIn = true
 	st.Account = result.Account.PreferredUsername
-	st.Tenant = result.Account.Realm
+	st.Tenant = result.IDToken.TenantID
+	if st.Tenant == "" {
+		st.Tenant = tenantOf(result.Account)
+	}
 	st.TokenExpires = result.ExpiresOn
 	st.Scopes = result.GrantedScopes
 	return st, nil
+}
+
+// tenantOf reads the tenant ID out of a cached account. MSAL records the
+// authority's tenant segment as the account's realm, which for this
+// registration is the literal "common", so the answer comes from the home
+// account ID instead: MSAL forms it as "<user oid>.<tenant id>".
+func tenantOf(account public.Account) string {
+	if _, tenant, ok := strings.Cut(account.HomeAccountID, "."); ok && tenant != "" {
+		return tenant
+	}
+	return account.Realm
 }
 
 // WriteStatus renders st for a human. The layout is the same in every tool of
@@ -96,11 +110,21 @@ func WriteStatus(w io.Writer, st Status) {
 	fmt.Fprintf(w, "Cache          %s\n", st.Cache)
 }
 
+// untilPhrase says how far off d is in hours and minutes, the precision a
+// reader wants for a token that lasts about an hour.
 func untilPhrase(d time.Duration) string {
 	if d <= 0 {
 		return "lapsed"
 	}
-	return "in " + d.Round(time.Minute).String()
+	d = d.Round(time.Minute)
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("in %dm", m)
+	case m == 0:
+		return fmt.Sprintf("in %dh", h)
+	}
+	return fmt.Sprintf("in %dh%02dm", h, m)
 }
 
 // AuthCommand is the family's bare `auth` subcommand: it reports the shared
