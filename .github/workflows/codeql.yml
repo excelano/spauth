@@ -1,0 +1,25 @@
+name: CodeQL
+
+# The scan itself lives in excelano/.github, so every repo in the fleet runs the
+# same one and a correction reaches all of them at once. What stays here is when
+# to run and what to scan: that is this repo's business, the policy is the
+# fleet's. Same split as ci.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  analyze:
+    # A called workflow cannot be granted more than its caller holds, so the
+    # upload permission has to be here rather than only in the called file.
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: excelano/.github/.github/workflows/codeql.yml@main
+    with:
+      language: go
