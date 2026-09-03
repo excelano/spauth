@@ -38,6 +38,10 @@ body, err := graph.Get(ctx, "/sites/"+siteID+"/lists", nil)
 
 The file is MSAL's own format, written 0600 in a 0700 directory. Writes go through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
 
+## The state command
+
+Every tool in the family answers a bare `auth` with the state of the shared session — account, tenant, token expiry and scopes — and exits 0 whether or not one exists, so a caller that would rather ask than find out can branch on the report instead of on a failed attempt. `AuthCommand` is that subcommand, flag parsing and rendering included, so the six binaries agree by construction; `CheckStatus` is the underlying question for a program that wants the `Status` value. Neither starts a sign-in: with no cached account the answer is offline, and with one it is a silent token renewal, which proves the refresh token still works. `--json` prints the same fields as an object.
+
 ## Not a consumer
 
 blick-cli hand-rolls `x/oauth2` against per-tenant mailbox scopes. That is a different design on purpose and should not be folded in here.
