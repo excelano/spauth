@@ -54,12 +54,15 @@ var defaultScopes = []string{
 
 // NewPublicClient constructs the MSAL public client used for both silent and
 // device code token acquisition. Refresh tokens are persisted at cachePath
-// across runs; see CachePath for where the family keeps them.
-func NewPublicClient(cachePath string) (public.Client, error) {
+// across runs; consumers pass CachePath() so the family shares one session.
+// legacyPath names the per-tool cache the consumer kept before the cache was
+// shared, or "" if it never had one; when cachePath does not exist yet and
+// the legacy file does, the legacy file is read once and copied into place.
+func NewPublicClient(cachePath, legacyPath string) (public.Client, error) {
 	c, err := public.New(
 		defaultClientID,
 		public.WithAuthority(defaultAuthority),
-		public.WithCache(newFileCache(cachePath)),
+		public.WithCache(newFileCache(cachePath, legacyPath)),
 	)
 	if err != nil {
 		return public.Client{}, fmt.Errorf("creating MSAL public client: %w", err)

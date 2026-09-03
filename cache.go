@@ -10,19 +10,53 @@ import (
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 )
 
+// cacheFileName is the token cache's basename, the same in the shared
+// location and in every legacy per-tool directory.
+const cacheFileName = "sp-token.json"
+
+// CachePath returns the token cache every tool on the registration shares:
+// $XDG_CONFIG_HOME/excelano/sp-token.json, or ~/.config/excelano/sp-token.json.
+// The directory is named for the registration rather than for either repo,
+// because xql is not an xfiles tool and the cache belongs to neither.
+func CachePath() string {
+	return filepath.Join(configHome(), "excelano", cacheFileName)
+}
+
+func configHome() string {
+	if d := os.Getenv("XDG_CONFIG_HOME"); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".config"
+	}
+	return filepath.Join(home, ".config")
+}
+
 // fileCache persists MSAL's token cache to a single JSON file with restrictive
 // permissions. The file format is opaque (managed by MSAL); we just shuttle
 // bytes.
+//
+// legacy, when set, names the per-tool cache a consumer kept before the family
+// shared one. The first time the shared file is found absent the legacy file
+// is copied into place, so a user who had signed in to any one tool is signed
+// in to all of them without doing it again. The legacy file is left where it
+// was: an older binary can still use it, and the consumer's uninstaller is
+// what removes it.
 type fileCache struct {
-	path string
+	path   string
+	legacy string
 }
 
-func newFileCache(path string) *fileCache {
-	return &fileCache{path: path}
+func newFileCache(path, legacy string) *fileCache {
+	return &fileCache{path: path, legacy: legacy}
 }
 
 func (c *fileCache) Replace(ctx context.Context, target cache.Unmarshaler, hints cache.ReplaceHints) error {
 	data, err := os.ReadFile(c.path)
+	if errors.Is(err, os.ErrNotExist) && c.legacy != "" {
+		data, err = c.migrate()
+	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -30,6 +64,22 @@ func (c *fileCache) Replace(ctx context.Context, target cache.Unmarshaler, hints
 		return fmt.Errorf("reading token cache: %w", err)
 	}
 	return target.Unmarshal(data)
+}
+
+// migrate copies the legacy cache to the shared path and returns its bytes.
+// A missing legacy file is reported as os.ErrNotExist, the same answer an
+// empty cache gives. The copy is written explicitly rather than left to the
+// next Export, because MSAL only exports when the cache changed, and a still-
+// valid access token means it need not change for an hour.
+func (c *fileCache) migrate() ([]byte, error) {
+	data, err := os.ReadFile(c.legacy)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeCacheFile(c.path, data); err != nil {
+		return nil, fmt.Errorf("migrating token cache from %s: %w", c.legacy, err)
+	}
+	return data, nil
 }
 
 func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints cache.ExportHints) error {

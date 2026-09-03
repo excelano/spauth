@@ -21,7 +21,7 @@ func TestAuthenticateRefusesDeviceCodeWithoutTerminal(t *testing.T) {
 	// skipped and control reaches the guard without any network call. A
 	// zero-value public.Client cannot stand in here — MSAL dereferences its
 	// internals and panics.
-	client, err := NewPublicClient(filepath.Join(t.TempDir(), "sp-token.json"))
+	client, err := NewPublicClient(filepath.Join(t.TempDir(), "sp-token.json"), "")
 	if err != nil {
 		t.Fatalf("NewPublicClient: %v", err)
 	}

@@ -15,7 +15,7 @@ go get github.com/excelano/spauth
 ```go
 import "github.com/excelano/spauth"
 
-client, err := spauth.NewPublicClient(cachePath)
+client, err := spauth.NewPublicClient(spauth.CachePath(), legacyCachePath)
 if err != nil { /* setup failure */ }
 
 result, err := spauth.Authenticate(ctx, client)
@@ -34,7 +34,9 @@ body, err := graph.Get(ctx, "/sites/"+siteID+"/lists", nil)
 
 ## The token cache
 
-The cache file is MSAL's own format, written 0600 in a 0700 directory. Writes go through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
+`CachePath` is `~/.config/excelano/sp-token.json` (under `$XDG_CONFIG_HOME` when that is set), one file for the whole family, so signing in with any tool signs in all of them. The second argument to `NewPublicClient` names the per-tool cache a consumer kept before the cache was shared; when the shared file does not exist yet and that one does, it is copied into place on first use and nobody signs in again. Pass `""` for a consumer that never had one.
+
+The file is MSAL's own format, written 0600 in a 0700 directory. Writes go through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
 
 ## Not a consumer
 
