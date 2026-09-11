@@ -8,7 +8,7 @@ Please do not open public issues for security problems.
 
 ## Supported versions
 
-The latest v0.x release receives security fixes. Older versions are not supported.
+The latest release receives security fixes. Older versions are not supported.
 
 ## What spauth can access
 
