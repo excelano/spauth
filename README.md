@@ -58,4 +58,4 @@ blick-cli hand-rolls `x/oauth2` against per-tenant mailbox scopes. That is a dif
 
 ## License
 
-MIT. Author: David M. Anderson. Built with AI assistance (Claude, Anthropic).
+MIT. Author: David M. Anderson.
