@@ -185,6 +185,44 @@ func TestReplaceSealsMigratedLegacyCache(t *testing.T) {
 // A user whose shared cache was copied from the legacy one before sealing
 // existed still has the plaintext legacy file. Sealing the shared cache is
 // what removes it.
+// withAvailableButUnreachableSealing stands in a platform that has a
+// facility (Available() true, the Linux/macOS case) but cannot reach it on
+// this call — no session bus, a locked Keychain — so Seal falls back to
+// plaintext exactly like atrest itself does in that situation.
+func withAvailableButUnreachableSealing(t *testing.T) {
+	t.Helper()
+	savedAvailable, savedSeal, savedOpen := sealAvailable, seal, open
+	sealAvailable = func() bool { return true }
+	seal = func(name string, data []byte) ([]byte, error) { return data, nil }
+	open = func(name string, data []byte) ([]byte, bool, error) { return data, false, nil }
+	t.Cleanup(func() { sealAvailable, seal, open = savedAvailable, savedSeal, savedOpen })
+}
+
+// A platform can report sealing available while this particular call cannot
+// reach a key store — no session bus, a locked Keychain — the gap that opened
+// once Linux and macOS could fall back mid-call the way Windows never did.
+// Migrating a legacy cache in that state must not delete it: the shared copy
+// just written is plaintext too, so deleting the legacy file would relocate
+// the same exposure rather than remove a redundant one beside a sealed cache.
+func TestReplaceKeepsLegacyWhenSealingUnavailableThisCall(t *testing.T) {
+	withAvailableButUnreachableSealing(t)
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "excelano", "sp-token.json")
+	legacy := filepath.Join(dir, "xftp", "sp-token.json")
+	if err := writeCacheFile(legacy, []byte(`{"from":"legacy"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readThrough(newFileCache(shared, legacy)); err != nil || got != `{"from":"legacy"}` {
+		t.Errorf("read = %q, %v; want the legacy cache", got, err)
+	}
+	if data, _ := os.ReadFile(shared); string(data) != `{"from":"legacy"}` {
+		t.Errorf("shared cache = %q; want the legacy cache, plaintext", data)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Errorf("legacy cache should be left in place, since the shared copy is not sealed: %v", err)
+	}
+}
+
 func TestReplaceRemovesLegacyWhenSealingEarlierMigration(t *testing.T) {
 	withFakeSealing(t)
 	dir := t.TempDir()

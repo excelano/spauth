@@ -4,6 +4,7 @@
 package spauth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -116,21 +117,28 @@ func (c *fileCache) read() ([]byte, error) {
 		return nil, err
 	}
 	if fromLegacy || (!sealed && sealAvailable()) {
-		if err := c.write(plain); err != nil {
+		wroteSealed, err := c.write(plain)
+		if err != nil {
 			return nil, fmt.Errorf("storing token cache sealed: %w", err)
 		}
-		c.removeLegacy()
+		// Gated on what this write actually did, not on sealAvailable():
+		// availability is a platform property, and a call can still fall
+		// back to plaintext when nothing is reachable at the moment (no
+		// session bus, a locked Keychain). Deleting the legacy file then
+		// would trade a plaintext copy at the old path for one at the new
+		// path, not remove a redundant one beside a sealed one.
+		if wroteSealed {
+			c.removeLegacy()
+		}
 	}
 	return plain, nil
 }
 
-// removeLegacy deletes the legacy cache once the shared one is sealed. It
-// runs whenever a plaintext cache is sealed, which also reaches a user whose
-// shared cache was copied from the legacy one by a build before sealing. A
-// failure leaves the file for the uninstaller, as before sealing; it costs the
-// sign-in nothing.
+// removeLegacy deletes the legacy cache. Called only once the shared cache is
+// confirmed sealed, so a failure here costs nothing but the uninstaller's
+// purge step doing the removal instead.
 func (c *fileCache) removeLegacy() {
-	if c.legacy != "" && sealAvailable() {
+	if c.legacy != "" {
 		os.Remove(c.legacy)
 	}
 }
@@ -140,15 +148,23 @@ func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints ca
 	if err != nil {
 		return fmt.Errorf("marshaling token cache: %w", err)
 	}
-	return c.write(data)
+	_, err = c.write(data)
+	return err
 }
 
-func (c *fileCache) write(plain []byte) error {
+// write seals plain if it can and writes the result, reporting whether the
+// stored bytes actually ended up sealed. Seal itself reports no such thing —
+// it can fall back to returning its input unchanged — so that is read back
+// here by comparing what went in against what came out.
+func (c *fileCache) write(plain []byte) (sealed bool, err error) {
 	stored, err := seal(sealName, plain)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return writeCacheFile(c.path, stored)
+	if err := writeCacheFile(c.path, stored); err != nil {
+		return false, err
+	}
+	return !bytes.Equal(stored, plain), nil
 }
 
 // writeCacheFile replaces path with data in a single rename. The cache is
