@@ -1,7 +1,9 @@
 github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0 h1:Byx2mFH6zOunKuxJlzKj/L31czf2B45rsjToG4yo8uI=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0/go.mod h1:OZ+YRWCg7N54lg8lzu1OiGRGbWsqPh+FEGHA7bvbLKA=
-github.com/excelano/atrest v0.1.0 h1:hbhfwgsMbegg4o8pZ0uNZ7cvp8edjw6wvQZrNwnHxCo=
-github.com/excelano/atrest v0.1.0/go.mod h1:76NjGMtRzeiJHum25klkVyg2c/eVN0JN08JXre3gwKA=
+github.com/excelano/atrest v0.1.1 h1:GLmws8CUSNhr9Ti835er1xg6WBI7naLIzdF3VMadI1I=
+github.com/excelano/atrest v0.1.1/go.mod h1:37sYGviZDkcPVIVxkAvxQ49Z145up4cCwaoGn8H93OI=
+github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
+github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=

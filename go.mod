@@ -6,11 +6,12 @@ go 1.26.0
 // next release. Read the MSAL changelog before taking a minor.
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.10.0
-	github.com/excelano/atrest v0.1.0
+	github.com/excelano/atrest v0.1.1
 	golang.org/x/term v0.46.0
 )
 
 require (
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect

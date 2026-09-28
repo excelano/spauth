@@ -227,6 +227,43 @@ func withoutSealing(t *testing.T) {
 	t.Cleanup(func() { sealAvailable, seal, open = savedAvailable, savedSeal, savedOpen })
 }
 
+// TestExportSealsForRealOnThisMachine drives fileCache through the real
+// atrest package, not the fakeProtector every other test in this file
+// stands in, so a break in the wiring between spauth and atrest — the wrong
+// package var, the wrong seal name, an argument swapped — shows up here
+// rather than only after a release. What it can prove depends on what this
+// machine actually offers: a Windows or a Linux box with a reachable key
+// store proves sealing works, and a machine offering none proves the
+// fallback is exactly the pre-sealing behaviour instead of an error.
+func TestExportSealsForRealOnThisMachine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sp-token.json")
+	c := newFileCache(path, "")
+	const plain = `{"real":1}`
+	if err := c.Export(context.Background(), marshaler(plain), cache.ExportHints{}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	stored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPlain, sealed, err := atrest.Open(sealName, stored)
+	if err != nil {
+		t.Fatalf("atrest.Open of what Export wrote: %v", err)
+	}
+	if string(gotPlain) != plain {
+		t.Errorf("round trip = %q, want %q", gotPlain, plain)
+	}
+	if sealed != (string(stored) != plain) {
+		t.Errorf("sealed=%v but stored bytes %s the plaintext", sealed, map[bool]string{true: "equal", false: "differ from"}[string(stored) == plain])
+	}
+	t.Logf("on this machine, Export sealed=%v (stored: %s)", sealed, stored)
+
+	got, err := readThrough(newFileCache(path, ""))
+	if err != nil || got != plain {
+		t.Errorf("read back through Replace = %q, %v; want %q", got, err, plain)
+	}
+}
+
 type marshaler string
 
 func (m marshaler) Marshal() ([]byte, error) { return []byte(m), nil }
