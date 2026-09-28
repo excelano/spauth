@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
@@ -44,7 +45,9 @@ func TestWriteCacheFileReplacesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
+	// Windows has no Unix mode bits, and Go reports any writable file there
+	// as 0666; the profile's ACL keeps other accounts out instead.
+	if perm := info.Mode().Perm(); perm != 0600 && runtime.GOOS != "windows" {
 		t.Errorf("mode = %o, want 0600", perm)
 	}
 
