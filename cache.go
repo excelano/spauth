@@ -1,3 +1,6 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package spauth
 
 import (
@@ -8,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
+	"github.com/excelano/atrest"
 )
 
 // cacheFileName is the token cache's basename, the same in the shared
@@ -33,16 +37,44 @@ func configHome() string {
 	return filepath.Join(home, ".config")
 }
 
-// fileCache persists MSAL's token cache to a single JSON file with restrictive
-// permissions. The file format is opaque (managed by MSAL); we just shuttle
-// bytes.
+// sealName labels the cache to atrest, which binds it into the protection.
+// Changing it makes every sealed cache unreadable, costing each user a
+// sign-in.
+const sealName = "excelano/sp-token"
+
+// The atrest calls are variables so tests can stand in a sealing platform on
+// hosts that have none.
+var (
+	sealAvailable = atrest.Available
+	seal          = atrest.Seal
+	open          = atrest.Open
+)
+
+// fileCache persists MSAL's token cache to a single file, sealed with the
+// operating system's data protection where atrest has one and plaintext
+// elsewhere. MSAL's format is opaque to us; we seal and shuttle bytes.
+//
+// A plaintext cache is read as it is and stored sealed straight away, so an
+// upgrade costs nobody a sign-in. That covers a cache from a build before
+// sealing, and one an older build wrote back after reading a sealed cache as
+// empty, which it does because the envelope is a JSON object MSAL does not
+// recognise. The write happens on read rather than at the next Export,
+// because MSAL only exports when the cache changed, and a still-valid access
+// token means it need not change for an hour.
+//
+// A sealed cache that cannot be opened here, such as one sealed by another
+// user or on another machine, is treated as absent: the user signs in again
+// and the next Export replaces it.
 //
 // legacy, when set, names the per-tool cache a consumer kept before the family
 // shared one. The first time the shared file is found absent the legacy file
-// is copied into place, so a user who had signed in to any one tool is signed
-// in to all of them without doing it again. The legacy file is left where it
-// was: an older binary can still use it, and the consumer's uninstaller is
-// what removes it.
+// is read and stored at the shared path, so a user who had signed in to any
+// one tool is signed in to all of them without doing it again. Where the
+// cache is sealed, the legacy file is deleted as soon as its contents are
+// stored sealed, because leaving it would keep a plaintext copy of the same
+// refresh token beside the sealed one; a binary old enough to read it asks
+// for one sign-in. Where nothing seals, it is left for such a binary to use,
+// and the consumer's uninstaller is what removes it.
 type fileCache struct {
 	path   string
 	legacy string
@@ -53,33 +85,54 @@ func newFileCache(path, legacy string) *fileCache {
 }
 
 func (c *fileCache) Replace(ctx context.Context, target cache.Unmarshaler, hints cache.ReplaceHints) error {
-	data, err := os.ReadFile(c.path)
-	if errors.Is(err, os.ErrNotExist) && c.legacy != "" {
-		data, err = c.migrate()
+	data, err := c.read()
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, atrest.ErrCannotOpen) {
+		return nil
 	}
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("reading token cache: %w", err)
+		return err
 	}
 	return target.Unmarshal(data)
 }
 
-// migrate copies the legacy cache to the shared path and returns its bytes.
-// A missing legacy file is reported as os.ErrNotExist, the same answer an
-// empty cache gives. The copy is written explicitly rather than left to the
-// next Export, because MSAL only exports when the cache changed, and a still-
-// valid access token means it need not change for an hour.
-func (c *fileCache) migrate() ([]byte, error) {
-	data, err := os.ReadFile(c.legacy)
+// read returns the cache's plaintext, falling back to the legacy file when
+// the shared one is absent, and stores it sealed when it was found unsealed
+// or at the legacy path. A missing cache is reported as os.ErrNotExist.
+func (c *fileCache) read() ([]byte, error) {
+	stored, err := os.ReadFile(c.path)
+	fromLegacy := false
+	if errors.Is(err, os.ErrNotExist) && c.legacy != "" {
+		stored, err = os.ReadFile(c.legacy)
+		fromLegacy = true
+	}
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("reading token cache: %w", err)
+	}
+	plain, sealed, err := open(sealName, stored)
 	if err != nil {
 		return nil, err
 	}
-	if err := writeCacheFile(c.path, data); err != nil {
-		return nil, fmt.Errorf("migrating token cache from %s: %w", c.legacy, err)
+	if fromLegacy || (!sealed && sealAvailable()) {
+		if err := c.write(plain); err != nil {
+			return nil, fmt.Errorf("storing token cache sealed: %w", err)
+		}
+		c.removeLegacy()
 	}
-	return data, nil
+	return plain, nil
+}
+
+// removeLegacy deletes the legacy cache once the shared one is sealed. It
+// runs whenever a plaintext cache is sealed, which also reaches a user whose
+// shared cache was copied from the legacy one by a build before sealing. A
+// failure leaves the file for the uninstaller, as before sealing; it costs the
+// sign-in nothing.
+func (c *fileCache) removeLegacy() {
+	if c.legacy != "" && sealAvailable() {
+		os.Remove(c.legacy)
+	}
 }
 
 func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints cache.ExportHints) error {
@@ -87,7 +140,15 @@ func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints ca
 	if err != nil {
 		return fmt.Errorf("marshaling token cache: %w", err)
 	}
-	return writeCacheFile(c.path, data)
+	return c.write(data)
+}
+
+func (c *fileCache) write(plain []byte) error {
+	stored, err := seal(sealName, plain)
+	if err != nil {
+		return err
+	}
+	return writeCacheFile(c.path, stored)
 }
 
 // writeCacheFile replaces path with data in a single rename. The cache is
@@ -96,8 +157,10 @@ func (c *fileCache) Export(ctx context.Context, source cache.Marshaler, hints ca
 // file — leaves a truncated JSON document that MSAL cannot read, which costs
 // every tool sharing the file its session. Writing to a sibling temp file and
 // renaming it over the old one means a reader sees either the previous cache
-// or the new one. The temp file is created 0600, so the refresh token is never
-// readable by others even for the instant before the rename.
+// or the new one. The temp file is created 0600, so no other account on the
+// host can read it even before the rename. File modes stop other accounts and
+// nothing more; keeping the contents useless once copied elsewhere is what
+// sealing in write is for.
 func writeCacheFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0700); err != nil {

@@ -12,3 +12,7 @@ on:
 jobs:
   ci:
     uses: excelano/.github/.github/workflows/go-lib-ci.yml@main
+    # The token cache is sealed only on Windows, and only a Windows runner
+    # executes that path.
+    with:
+      platforms: '["ubuntu-latest", "windows-latest"]'

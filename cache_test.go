@@ -1,12 +1,19 @@
+// Author: David M. Anderson
+// Built with AI assistance (Claude, Anthropic)
+
 package spauth
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
+	"github.com/excelano/atrest"
 )
 
 // writeCacheFile has to leave either the old cache or the new one on disk,
@@ -59,6 +66,7 @@ func TestWriteCacheFileReplacesAtomically(t *testing.T) {
 // exists the legacy one is ignored, and a consumer with no legacy file gets
 // an empty cache rather than an error.
 func TestReplaceMigratesLegacyCacheOnce(t *testing.T) {
+	withoutSealing(t)
 	dir := t.TempDir()
 	shared := filepath.Join(dir, "excelano", "sp-token.json")
 	legacy := filepath.Join(dir, "xftp", "sp-token.json")
@@ -97,6 +105,128 @@ func TestReplaceMigratesLegacyCacheOnce(t *testing.T) {
 		t.Errorf("read with neither file = %q, %v; want an empty cache and no error", got, err)
 	}
 }
+
+// withFakeSealing stands in a sealing platform, so the paths that only run on
+// Windows run here. Sealed bytes carry a "sealed:" prefix; bytes beginning
+// "foreign:" are an envelope this host cannot open.
+func withFakeSealing(t *testing.T) {
+	t.Helper()
+	savedAvailable, savedSeal, savedOpen := sealAvailable, seal, open
+	sealAvailable = func() bool { return true }
+	seal = func(name string, data []byte) ([]byte, error) {
+		return append([]byte("sealed:"), data...), nil
+	}
+	open = func(name string, data []byte) ([]byte, bool, error) {
+		if rest, ok := bytes.CutPrefix(data, []byte("sealed:")); ok {
+			return rest, true, nil
+		}
+		if bytes.HasPrefix(data, []byte("foreign:")) {
+			return nil, false, fmt.Errorf("%w: test", atrest.ErrCannotOpen)
+		}
+		return data, false, nil
+	}
+	t.Cleanup(func() { sealAvailable, seal, open = savedAvailable, savedSeal, savedOpen })
+}
+
+func TestExportSealsAndReplaceOpens(t *testing.T) {
+	withFakeSealing(t)
+	path := filepath.Join(t.TempDir(), "sp-token.json")
+	c := newFileCache(path, "")
+	if err := c.Export(context.Background(), marshaler(`{"rt":1}`), cache.ExportHints{}); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != `sealed:{"rt":1}` {
+		t.Errorf("stored = %q; want it sealed", data)
+	}
+	if got, err := readThrough(c); err != nil || got != `{"rt":1}` {
+		t.Errorf("read = %q, %v; want the plaintext", got, err)
+	}
+}
+
+// A plaintext cache, from a build before sealing or written back by one, is
+// used as it is and stored sealed on the same read, so nobody signs in again
+// and the plaintext does not wait on MSAL's next Export.
+func TestReplaceSealsPlaintextCache(t *testing.T) {
+	withFakeSealing(t)
+	path := filepath.Join(t.TempDir(), "sp-token.json")
+	if err := writeCacheFile(path, []byte(`{"rt":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readThrough(newFileCache(path, "")); err != nil || got != `{"rt":1}` {
+		t.Errorf("read = %q, %v; want the plaintext cache", got, err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != `sealed:{"rt":1}` {
+		t.Errorf("stored after read = %q; want it sealed", data)
+	}
+}
+
+func TestReplaceSealsMigratedLegacyCache(t *testing.T) {
+	withFakeSealing(t)
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "excelano", "sp-token.json")
+	legacy := filepath.Join(dir, "xftp", "sp-token.json")
+	if err := writeCacheFile(legacy, []byte(`{"from":"legacy"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readThrough(newFileCache(shared, legacy)); err != nil || got != `{"from":"legacy"}` {
+		t.Errorf("read = %q, %v; want the legacy cache", got, err)
+	}
+	if data, _ := os.ReadFile(shared); string(data) != `sealed:{"from":"legacy"}` {
+		t.Errorf("shared cache = %q; want the legacy cache, sealed", data)
+	}
+	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("legacy cache still present after a sealed migration: %v", err)
+	}
+}
+
+// A user whose shared cache was copied from the legacy one before sealing
+// existed still has the plaintext legacy file. Sealing the shared cache is
+// what removes it.
+func TestReplaceRemovesLegacyWhenSealingEarlierMigration(t *testing.T) {
+	withFakeSealing(t)
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "excelano", "sp-token.json")
+	legacy := filepath.Join(dir, "xftp", "sp-token.json")
+	for _, p := range []string{shared, legacy} {
+		if err := writeCacheFile(p, []byte(`{"rt":1}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := readThrough(newFileCache(shared, legacy)); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("legacy cache still present after sealing the shared one: %v", err)
+	}
+}
+
+// A cache sealed by another user or machine costs a sign-in, not an error that
+// would fail every call until someone deletes the file.
+func TestReplaceTreatsUnopenableCacheAsEmpty(t *testing.T) {
+	withFakeSealing(t)
+	path := filepath.Join(t.TempDir(), "sp-token.json")
+	if err := writeCacheFile(path, []byte("foreign:xyz")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := readThrough(newFileCache(path, "")); err != nil || got != "" {
+		t.Errorf("read = %q, %v; want an empty cache and no error", got, err)
+	}
+}
+
+// withoutSealing stands in a platform with nothing to seal with, so the
+// plaintext paths are tested on Windows as well.
+func withoutSealing(t *testing.T) {
+	t.Helper()
+	savedAvailable, savedSeal, savedOpen := sealAvailable, seal, open
+	sealAvailable = func() bool { return false }
+	seal = func(name string, data []byte) ([]byte, error) { return data, nil }
+	open = func(name string, data []byte) ([]byte, bool, error) { return data, false, nil }
+	t.Cleanup(func() { sealAvailable, seal, open = savedAvailable, savedSeal, savedOpen })
+}
+
+type marshaler string
+
+func (m marshaler) Marshal() ([]byte, error) { return []byte(m), nil }
 
 // readThrough drives Replace the way MSAL does and hands back what the cache
 // delivered, or "" when it delivered nothing.

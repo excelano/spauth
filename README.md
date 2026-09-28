@@ -34,9 +34,9 @@ body, err := graph.Get(ctx, "/sites/"+siteID+"/lists", nil)
 
 ## The token cache
 
-`CachePath` is `~/.config/excelano/sp-token.json` (under `$XDG_CONFIG_HOME` when that is set), one file for the whole family, so signing in with any tool signs in all of them. The second argument to `NewPublicClient` names the per-tool cache a consumer kept before the cache was shared; when the shared file does not exist yet and that one does, it is copied into place on first use and nobody signs in again. Pass `""` for a consumer that never had one.
+`CachePath` is `~/.config/excelano/sp-token.json` (under `$XDG_CONFIG_HOME` when that is set), one file for the whole family, so signing in with any tool signs in all of them. The second argument to `NewPublicClient` names the per-tool cache a consumer kept before the cache was shared; when the shared file does not exist yet and that one does, it is copied into place on first use and nobody signs in again. Where the cache is sealed, the legacy file is then deleted, since it would be a plaintext copy of the same token. Pass `""` for a consumer that never had one.
 
-The file is MSAL's own format, written 0600 in a 0700 directory. Writes go through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
+The file holds MSAL's own format, sealed through [atrest](https://github.com/excelano/atrest) with the operating system's data protection where the platform has one, and plaintext where it does not. A plaintext cache left by an older build is read as it is and stored sealed on the same read, so upgrading costs nobody a sign-in, and an older build that meets a sealed cache reads it as empty and asks for one sign-in rather than failing. The file is written 0600 in a 0700 directory through a temp file and a rename, so a crash or a second process writing the same file leaves the previous cache intact rather than a truncated one.
 
 ## Testing against a tenant
 
