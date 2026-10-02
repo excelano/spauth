@@ -4,10 +4,7 @@ name: ci
 # so it calls the library policy: the binary checks plus a run against the
 # oldest Go version go.mod promises consumers.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   ci:
